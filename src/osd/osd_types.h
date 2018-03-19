@@ -1664,6 +1664,7 @@ struct object_stat_sum_t {
   int64_t num_objects_missing;
   int64_t num_legacy_snapsets; ///< upper bound on pre-luminous-style SnapSets
   int64_t num_large_omap_objects = 0;
+  int64_t num_objects_manifest = 0;
 
   object_stat_sum_t()
     : num_bytes(0),
@@ -1712,6 +1713,7 @@ struct object_stat_sum_t {
     FLOOR(num_wr_kb);
     FLOOR(num_scrub_errors);
     FLOOR(num_large_omap_objects);
+    FLOOR(num_objects_manifest);
     FLOOR(num_shallow_scrub_errors);
     FLOOR(num_deep_scrub_errors);
     FLOOR(num_objects_recovered);
@@ -1767,6 +1769,7 @@ struct object_stat_sum_t {
     SPLIT(num_wr_kb);
     SPLIT(num_scrub_errors);
     SPLIT(num_large_omap_objects);
+    SPLIT(num_objects_manifest);
     SPLIT(num_shallow_scrub_errors);
     SPLIT(num_deep_scrub_errors);
     SPLIT(num_objects_recovered);
@@ -1824,6 +1827,7 @@ struct object_stat_sum_t {
         sizeof(num_wr_kb) +
         sizeof(num_scrub_errors) +
         sizeof(num_large_omap_objects) +
+        sizeof(num_objects_manifest) +
         sizeof(num_objects_recovered) +
         sizeof(num_bytes_recovered) +
         sizeof(num_keys_recovered) +
@@ -1974,6 +1978,7 @@ struct pg_stat_t {
   bool hitset_stats_invalid:1;
   bool hitset_bytes_stats_invalid:1;
   bool pin_stats_invalid:1;
+  bool manifest_stats_invalid:1;
 
   pg_stat_t()
     : reported_seq(0),
@@ -1991,7 +1996,8 @@ struct pg_stat_t {
       omap_stats_invalid(false),
       hitset_stats_invalid(false),
       hitset_bytes_stats_invalid(false),
-      pin_stats_invalid(false)
+      pin_stats_invalid(false),
+      manifest_stats_invalid(false)
   { }
 
   epoch_t get_effective_last_epoch_clean() const {
@@ -3307,7 +3313,7 @@ struct pg_log_entry_t {
     MODIFY = 1,   // some unspecified modification (but not *all* modifications)
     CLONE = 2,    // cloned object from head
     DELETE = 3,   // deleted object
-    BACKLOG = 4,  // event invented by generate_backlog [deprecated]
+    //BACKLOG = 4,  // event invented by generate_backlog [obsolete]
     LOST_REVERT = 5, // lost new version, revert to an older version.
     LOST_DELETE = 6, // lost new version, revert to no object (deleted).
     LOST_MARK = 7,   // lost new version, now EIO
@@ -3325,8 +3331,6 @@ struct pg_log_entry_t {
       return "clone";
     case DELETE:
       return "delete";
-    case BACKLOG:
-      return "backlog";
     case LOST_REVERT:
       return "l_revert";
     case LOST_DELETE:
@@ -3380,7 +3384,6 @@ struct pg_log_entry_t {
   bool is_modify() const { return op == MODIFY; }
   bool is_promote() const { return op == PROMOTE; }
   bool is_clean() const { return op == CLEAN; }
-  bool is_backlog() const { return op == BACKLOG; }
   bool is_lost_revert() const { return op == LOST_REVERT; }
   bool is_lost_delete() const { return op == LOST_DELETE; }
   bool is_lost_mark() const { return op == LOST_MARK; }
@@ -3389,7 +3392,7 @@ struct pg_log_entry_t {
   bool is_update() const {
     return
       is_clone() || is_modify() || is_promote() || is_clean() ||
-      is_backlog() || is_lost_revert() || is_lost_mark();
+      is_lost_revert() || is_lost_mark();
   }
   bool is_delete() const {
     return op == DELETE || op == LOST_DELETE;
@@ -3903,9 +3906,6 @@ public:
       rmissing.erase((missing_it->second).need.version);
       (missing_it->second).need = e.version;  // leave .have unchanged.
       missing_it->second.set_delete(e.is_delete());
-    } else if (e.is_backlog()) {
-      // May not have prior version
-      assert(0 == "these don't exist anymore");
     } else {
       // not missing, we must have prior_version (if any)
       assert(!is_missing_divergent_item);
