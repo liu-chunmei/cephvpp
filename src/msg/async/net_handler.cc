@@ -24,6 +24,7 @@
 #include "net_handler.h"
 #include "common/errno.h"
 #include "common/debug.h"
+#include "msg/async/vcl/vcl.h"
 
 #define dout_subsys ceph_subsys_ms
 #undef dout_prefix
@@ -35,11 +36,18 @@ int NetHandler::create_socket(int domain, bool reuse_addr)
 {
   int s;
   int r = 0;
-
-  if ((s = ::socket(domain, SOCK_STREAM, 0)) == -1) {
-    r = errno;
-    lderr(cct) << __func__ << " couldn't create socket " << cpp_strerror(r) << dendl;
-    return -r;
+  if (ms_vpp_enable){
+    if ((s = vcl_socket(domain, SOCK_STREAM, 0)) == -1) {
+      r = errno;
+      lderr(cct) << __func__ << " couldn't create socket " << cpp_strerror(r) << dendl;
+      return -r;
+    }
+  }else {
+    if ((s = ::socket(domain, SOCK_STREAM, 0)) == -1) {
+      r = errno;
+      lderr(cct) << __func__ << " couldn't create socket " << cpp_strerror(r) << dendl;
+      return -r;
+    }
   }
 
 #if !defined(__FreeBSD__)
@@ -47,13 +55,23 @@ int NetHandler::create_socket(int domain, bool reuse_addr)
    * will be able to close/open sockets a zillion of times */
   if (reuse_addr) {
     int on = 1;
-    if (::setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) == -1) {
-      r = errno;
-      lderr(cct) << __func__ << " setsockopt SO_REUSEADDR failed: "
+    if (ms_vpp_enable){
+      if (vcl_setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) == -1) {
+        r = errno;
+        lderr(cct) << __func__ << " setsockopt SO_REUSEADDR failed: "
                  << strerror(r) << dendl;
-      close(s);
-      return -r;
-    }
+        close(s);
+        return -r;
+      }
+    }else {
+      if (::setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) == -1) {
+        r = errno;
+        lderr(cct) << __func__ << " setsockopt SO_REUSEADDR failed: "
+                   << strerror(r) << dendl;
+        close(s);
+        return -r;
+      }
+    }   
   }
 #endif
 
@@ -68,22 +86,38 @@ int NetHandler::set_nonblock(int sd)
   /* Set the socket nonblocking.
    * Note that fcntl(2) for F_GETFL and F_SETFL can't be
    * interrupted by a signal. */
-  if ((flags = fcntl(sd, F_GETFL)) < 0 ) {
-    r = errno;
-    lderr(cct) << __func__ << " fcntl(F_GETFL) failed: " << cpp_strerror(r) << dendl;
-    return -r;
+  if(ms_vpp_enable){
+    if ((flags = vcl_fcntl(sd, F_GETFL)) < 0 ) {
+      r = errno;
+      lderr(cct) << __func__ << " fcntl(F_GETFL) failed: " << cpp_strerror(r) << dendl;
+      return -r;
+    }
+  }else {
+    if ((flags = fcntl(sd, F_GETFL)) < 0 ) {
+      r = errno;
+      lderr(cct) << __func__ << " fcntl(F_GETFL) failed: " << cpp_strerror(r) << dendl;
+      return -r;
+    }
   }
-  if (fcntl(sd, F_SETFL, flags | O_NONBLOCK) < 0) {
-    r = errno;
-    lderr(cct) << __func__ << " fcntl(F_SETFL,O_NONBLOCK): " << cpp_strerror(r) << dendl;
-    return -r;
-  }
-
+  if(ms_vpp_enable){
+    if (vcl_fcntl(sd, F_SETFL, flags | O_NONBLOCK) < 0) {
+      r = errno;
+      lderr(cct) << __func__ << " fcntl(F_SETFL,O_NONBLOCK): " << cpp_strerror(r) << dendl;
+      return -r;
+    }
+  }else {
+    if (fcntl(sd, F_SETFL, flags | O_NONBLOCK) < 0) {
+      r = errno;
+      lderr(cct) << __func__ << " fcntl(F_SETFL,O_NONBLOCK): " << cpp_strerror(r) << dendl;
+      return -r;
+    }
+  }  
   return 0;
 }
 
 void NetHandler::set_close_on_exec(int sd)
 {
+  return;
   int flags = fcntl(sd, F_GETFD, 0);
   if (flags < 0) {
     int r = errno;
@@ -104,28 +138,40 @@ int NetHandler::set_socket_options(int sd, bool nodelay, int size)
   // disable Nagle algorithm?
   if (nodelay) {
     int flag = 1;
-    r = ::setsockopt(sd, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(flag));
-    if (r < 0) {
-      r = errno;
-      ldout(cct, 0) << "couldn't set TCP_NODELAY: " << cpp_strerror(r) << dendl;
-    }
+    if (ms_vpp_enable){
+      r = vcl_setsockopt(sd, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(flag));
+      if (r < 0) {
+        r = errno;
+        ldout(cct, 0) << "couldn't set TCP_NODELAY: " << cpp_strerror(r) << dendl;
+      }
+    }else {
+      r = ::setsockopt(sd, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(flag));
+      if (r < 0) {
+        r = errno;
+        ldout(cct, 0) << "couldn't set TCP_NODELAY: " << cpp_strerror(r) << dendl;
+      }
+    }  
   }
   if (size) {
-    r = ::setsockopt(sd, SOL_SOCKET, SO_RCVBUF, (void*)&size, sizeof(size));
-    if (r < 0)  {
-      r = errno;
-      ldout(cct, 0) << "couldn't set SO_RCVBUF to " << size << ": " << cpp_strerror(r) << dendl;
+    if (!ms_vpp_enable){
+      r = ::setsockopt(sd, SOL_SOCKET, SO_RCVBUF, (void*)&size, sizeof(size));
+      if (r < 0)  {
+        r = errno;
+        ldout(cct, 0) << "couldn't set SO_RCVBUF to " << size << ": " << cpp_strerror(r) << dendl;
+      }
     }
   }
 
   // block ESIGPIPE
 #ifdef CEPH_USE_SO_NOSIGPIPE
   int val = 1;
-  r = ::setsockopt(sd, SOL_SOCKET, SO_NOSIGPIPE, (void*)&val, sizeof(val));
-  if (r) {
-    r = errno;
-    ldout(cct,0) << "couldn't set SO_NOSIGPIPE: " << cpp_strerror(r) << dendl;
-  }
+  if (!ms_vpp_enable){
+    r = ::setsockopt(sd, SOL_SOCKET, SO_NOSIGPIPE, (void*)&val, sizeof(val));
+    if (r) {
+      r = errno;
+      ldout(cct,0) << "couldn't set SO_NOSIGPIPE: " << cpp_strerror(r) << dendl;
+    }
+  }  
 #endif
   return -r;
 }
@@ -141,7 +187,8 @@ void NetHandler::set_priority(int sd, int prio, int domain)
   int r = -1;
   switch (domain) {
   case AF_INET:
-    r = ::setsockopt(sd, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos));
+    if (!ms_vpp_enable)
+      r = ::setsockopt(sd, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos));
     break;
   case AF_INET6:
     r = ::setsockopt(sd, IPPROTO_IPV6, IPV6_TCLASS, &iptos, sizeof(iptos));
@@ -161,11 +208,13 @@ void NetHandler::set_priority(int sd, int prio, int domain)
   // setsockopt(IPTOS_CLASS_CS6) sets the priority of the socket as 0.
   // See http://goo.gl/QWhvsD and http://goo.gl/laTbjT
   // We need to call setsockopt(SO_PRIORITY) after it.
-  r = ::setsockopt(sd, SOL_SOCKET, SO_PRIORITY, &prio, sizeof(prio));
-  if (r < 0) {
-    r = errno;
-    ldout(cct, 0) << __func__ << " couldn't set SO_PRIORITY to " << prio
+  if (!ms_vpp_enable){
+    r = ::setsockopt(sd, SOL_SOCKET, SO_PRIORITY, &prio, sizeof(prio));
+    if (r < 0) {
+      r = errno;
+      ldout(cct, 0) << __func__ << " couldn't set SO_PRIORITY to " << prio
 		  << ": " << cpp_strerror(r) << dendl;
+    }
   }
 #else
   return;
@@ -193,25 +242,45 @@ int NetHandler::generic_connect(const entity_addr_t& addr, const entity_addr_t &
     entity_addr_t addr = bind_addr;
     if (cct->_conf->ms_bind_before_connect && (!addr.is_blank_ip())) {
       addr.set_port(0);
-      ret = ::bind(s, addr.get_sockaddr(), addr.get_sockaddr_len());
-      if (ret < 0) {
-        ret = errno;
-        ldout(cct, 2) << __func__ << " client bind error " << ", " << cpp_strerror(ret) << dendl;
-        close(s);
-        return -ret;
+      if (ms_vpp_enable){
+        ret = vcl_bind(s, addr.get_sockaddr(), addr.get_sockaddr_len());
+        if (ret < 0) {
+          ret = errno;
+          ldout(cct, 2) << __func__ << " client bind error " << ", " << cpp_strerror(ret) << dendl;
+          vcl_close(s);
+          return -ret;
+        }
+      }else {
+        ret = ::bind(s, addr.get_sockaddr(), addr.get_sockaddr_len());
+        if (ret < 0) {
+          ret = errno;
+          ldout(cct, 2) << __func__ << " client bind error " << ", " << cpp_strerror(ret) << dendl;
+          close(s);
+          return -ret;
+        }
       }
     }
   }
-
-  ret = ::connect(s, addr.get_sockaddr(), addr.get_sockaddr_len());
-  if (ret < 0) {
-    ret = errno;
-    if (errno == EINPROGRESS && nonblock)
-      return s;
-
-    ldout(cct, 10) << __func__ << " connect: " << cpp_strerror(ret) << dendl;
-    close(s);
-    return -ret;
+  if (ms_vpp_enable){
+    ret = vcl_connect(s, addr.get_sockaddr(), addr.get_sockaddr_len());
+    if (ret < 0) {
+      ret = errno;
+      if (errno == EINPROGRESS && nonblock)
+        return s;
+      ldout(cct, 10) << __func__ << " connect: " << cpp_strerror(ret) << dendl;
+      vcl_close(s);
+      return -ret;
+    }
+  }else {
+    ret = ::connect(s, addr.get_sockaddr(), addr.get_sockaddr_len());
+    if (ret < 0) {
+      ret = errno;
+      if (errno == EINPROGRESS && nonblock)
+        return s;
+      ldout(cct, 10) << __func__ << " connect: " << cpp_strerror(ret) << dendl;
+      close(s);
+      return -ret;
+    }
   }
 
   return s;
@@ -220,8 +289,12 @@ int NetHandler::generic_connect(const entity_addr_t& addr, const entity_addr_t &
 int NetHandler::reconnect(const entity_addr_t &addr, int sd)
 {
   int r = 0;
-  int ret = ::connect(sd, addr.get_sockaddr(), addr.get_sockaddr_len());
-
+  int ret;
+  if (ms_vpp_enable)
+    ret = vcl_connect(sd, addr.get_sockaddr(), addr.get_sockaddr_len());
+  else
+    ret = ::connect(sd, addr.get_sockaddr(), addr.get_sockaddr_len());
+  
   if (ret < 0 && errno != EISCONN) {
     r = errno;
     ldout(cct, 10) << __func__ << " reconnect: " << strerror(r) << dendl;

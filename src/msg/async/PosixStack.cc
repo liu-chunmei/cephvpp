@@ -31,6 +31,7 @@
 #include "common/dout.h"
 #include "msg/Messenger.h"
 #include "include/sock_compat.h"
+#include "msg/async/vcl/vcl.h"
 
 #define dout_subsys ceph_subsys_ms
 #undef dout_prefix
@@ -66,7 +67,12 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
   }
 
   ssize_t read(char *buf, size_t len) override {
-    ssize_t r = ::read(_fd, buf, len);
+    ssize_t r;
+    if (ms_vpp_enable)
+      r = vcl_read(_fd, buf, len);
+    else
+      r = ::read(_fd, buf, len);  
+
     if (r < 0)
       r = -errno;
     return r;
@@ -80,7 +86,10 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
     while (1) {
       MSGR_SIGPIPE_STOPPER;
       ssize_t r;
-      r = ::sendmsg(fd, &msg, MSG_NOSIGNAL | (more ? MSG_MORE : 0));
+      if (ms_vpp_enable)
+        r = vcl_sendmsg(fd, &msg, MSG_NOSIGNAL | (more ? MSG_MORE : 0));
+      else
+        r = ::sendmsg(fd, &msg, MSG_NOSIGNAL | (more ? MSG_MORE : 0));
       if (r < 0) {
         if (errno == EINTR) {
           continue;
@@ -152,10 +161,16 @@ class PosixConnectedSocketImpl final : public ConnectedSocketImpl {
     return static_cast<ssize_t>(sent_bytes);
   }
   void shutdown() override {
-    ::shutdown(_fd, SHUT_RDWR);
+    if (ms_vpp_enable)
+      vcl_shutdown(_fd, SHUT_RDWR);
+    else
+      ::shutdown(_fd, SHUT_RDWR);
   }
   void close() override {
-    ::close(_fd);
+    if (ms_vpp_enable)
+      vcl_close(_fd);
+    else
+      ::close(_fd);
   }
   int fd() const override {
     return _fd;
@@ -172,7 +187,10 @@ class PosixServerSocketImpl : public ServerSocketImpl {
   explicit PosixServerSocketImpl(NetHandler &h, int f): handler(h), _fd(f) {}
   int accept(ConnectedSocket *sock, const SocketOptions &opts, entity_addr_t *out, Worker *w) override;
   void abort_accept() override {
-    ::close(_fd);
+    if (ms_vpp_enable)
+      vcl_close(_fd);
+    else
+      ::close(_fd);
   }
   int fd() const override {
     return _fd;
@@ -183,7 +201,11 @@ int PosixServerSocketImpl::accept(ConnectedSocket *sock, const SocketOptions &op
   assert(sock);
   sockaddr_storage ss;
   socklen_t slen = sizeof(ss);
-  int sd = ::accept(_fd, (sockaddr*)&ss, &slen);
+  int sd;
+  if (ms_vpp_enable)
+    sd = vcl_accept(_fd, (sockaddr*)&ss, &slen);
+  else
+    sd = ::accept(_fd, (sockaddr*)&ss, &slen);
   if (sd < 0) {
     return -errno;
   }
@@ -191,13 +213,19 @@ int PosixServerSocketImpl::accept(ConnectedSocket *sock, const SocketOptions &op
   handler.set_close_on_exec(sd);
   int r = handler.set_nonblock(sd);
   if (r < 0) {
-    ::close(sd);
+    if (ms_vpp_enable)
+      vcl_close(sd);
+    else
+      ::close(sd);
     return -errno;
   }
 
   r = handler.set_socket_options(sd, opt.nodelay, opt.rcbuf_size);
   if (r < 0) {
-    ::close(sd);
+    if (ms_vpp_enable)
+      vcl_close(sd);
+    else
+      ::close(sd);
     return -errno;
   }
 
@@ -225,31 +253,48 @@ int PosixWorker::listen(entity_addr_t &sa, const SocketOptions &opt,
 
   int r = net.set_nonblock(listen_sd);
   if (r < 0) {
-    ::close(listen_sd);
+    if(ms_vpp_enable)
+      vcl_close(listen_sd);
+    else
+      ::close(listen_sd);
     return -errno;
   }
 
   net.set_close_on_exec(listen_sd);
   r = net.set_socket_options(listen_sd, opt.nodelay, opt.rcbuf_size);
   if (r < 0) {
-    ::close(listen_sd);
+    if (ms_vpp_enable)
+      vcl_close(listen_sd);
+    else
+      ::close(listen_sd);
     return -errno;
   }
 
-  r = ::bind(listen_sd, sa.get_sockaddr(), sa.get_sockaddr_len());
+  if (ms_vpp_enable)
+    r = vcl_bind(listen_sd, sa.get_sockaddr(), sa.get_sockaddr_len());
+  else
+    r = ::bind(listen_sd, sa.get_sockaddr(), sa.get_sockaddr_len());
   if (r < 0) {
     r = -errno;
     ldout(cct, 10) << __func__ << " unable to bind to " << sa.get_sockaddr()
                    << ": " << cpp_strerror(r) << dendl;
-    ::close(listen_sd);
+    if (ms_vpp_enable)
+      vcl_close(listen_sd);
+    else
+      ::close(listen_sd);
     return r;
   }
-
-  r = ::listen(listen_sd, cct->_conf->ms_tcp_listen_backlog);
+  if (ms_vpp_enable)
+    r = vcl_listen (listen_sd, cct->_conf->ms_tcp_listen_backlog);
+  else
+    r = ::listen(listen_sd, cct->_conf->ms_tcp_listen_backlog);
   if (r < 0) {
     r = -errno;
     lderr(cct) << __func__ << " unable to listen on " << sa << ": " << cpp_strerror(r) << dendl;
-    ::close(listen_sd);
+    if (ms_vpp_enable)
+      vcl_close(listen_sd);
+    else
+      ::close(listen_sd);
     return r;
   }
 

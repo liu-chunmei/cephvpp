@@ -16,6 +16,7 @@
 
 #include "common/errno.h"
 #include "Event.h"
+#define HAVE_EPOLL 1 
 
 #ifdef HAVE_DPDK
 #include "dpdk/EventDPDK.h"

@@ -142,6 +142,7 @@ OPTION(ms_inject_delay_probability, OPT_DOUBLE) // range [0, 1]
 OPTION(ms_inject_internal_delays, OPT_DOUBLE)   // seconds
 OPTION(ms_dump_on_send, OPT_BOOL)           // hexdump msg to log on send
 OPTION(ms_dump_corrupt_message_level, OPT_INT)  // debug level to hexdump undecodeable messages at
+OPTION(ms_vpp_enable, OPT_BOOL)
 OPTION(ms_async_op_threads, OPT_U64)            // number of worker processing threads for async messenger created on init
 OPTION(ms_async_max_op_threads, OPT_U64)        // max number of worker processing threads for async messenger
 OPTION(ms_async_set_affinity, OPT_BOOL)

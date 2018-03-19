@@ -29,11 +29,12 @@
 
 #include "common/dout.h"
 #include "include/assert.h"
+#include "msg/async/vcl/vcl.h"
 
 #define dout_subsys ceph_subsys_ms
 #undef dout_prefix
 #define dout_prefix *_dout << "stack "
-
+int ms_vpp_enable = 0;
 std::function<void ()> NetworkStack::add_thread(unsigned i)
 {
   Worker *w = workers[i];
@@ -129,6 +130,10 @@ void NetworkStack::start()
   if (started) {
     return ;
   }
+  if (cct->_conf->ms_vpp_enable){
+    vcl_ldp_constructor();
+    ms_vpp_enable = 1;
+  }
 
   for (unsigned i = 0; i < num_workers; ++i) {
     if (workers[i]->is_init())
@@ -171,6 +176,10 @@ Worker* NetworkStack::get_worker()
 
 void NetworkStack::stop()
 {
+  if (cct->_conf->ms_vpp_enable){
+    vcl_ldp_destructor();
+    ms_vpp_enable=0;
+  }
   std::lock_guard<decltype(pool_spin)> lk(pool_spin);
   for (unsigned i = 0; i < num_workers; ++i) {
     workers[i]->done = true;

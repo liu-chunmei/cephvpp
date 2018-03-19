@@ -16,6 +16,7 @@
 
 #include "common/errno.h"
 #include "EventEpoll.h"
+#include "msg/async/vcl/vcl.h"
 
 #define dout_subsys ceph_subsys_ms
 
@@ -31,7 +32,11 @@ int EpollDriver::init(EventCenter *c, int nevent)
   }
   memset(events, 0, sizeof(struct epoll_event)*nevent);
 
-  epfd = epoll_create(1024); /* 1024 is just an hint for the kernel */
+  if (cct->_conf->ms_vpp_enable)  
+     epfd = vcl_epoll_create(1024);  
+  else  
+     epfd = epoll_create(1024); /* 1024 is just an hint for the kernel */ 
+
   if (epfd == -1) {
     lderr(cct) << __func__ << " unable to do epoll_create: "
                        << cpp_strerror(errno) << dendl;
@@ -61,10 +66,18 @@ int EpollDriver::add_event(int fd, int cur_mask, int add_mask)
     ee.events |= EPOLLOUT;
   ee.data.u64 = 0; /* avoid valgrind warning */
   ee.data.fd = fd;
-  if (epoll_ctl(epfd, op, fd, &ee) == -1) {
-    lderr(cct) << __func__ << " epoll_ctl: add fd=" << fd << " failed. "
+  if (cct->_conf->ms_vpp_enable){  
+     if (vcl_epoll_ctl(epfd, op, fd, &ee) == -1) {  
+       lderr(cct) << __func__ << " epoll_ctl: add fd=" << fd << " failed. "  
+                   << cpp_strerror(errno) << dendl;  
+        return -errno;  
+     }  
+  }else {  
+     if (epoll_ctl(epfd, op, fd, &ee) == -1) {  
+       lderr(cct) << __func__ << " epoll_ctl: add fd=" << fd << " failed. "  
                << cpp_strerror(errno) << dendl;
-    return -errno;
+        return -errno;
+     }
   }
 
   return 0;
@@ -84,19 +97,35 @@ int EpollDriver::del_event(int fd, int cur_mask, int delmask)
   ee.data.u64 = 0; /* avoid valgrind warning */
   ee.data.fd = fd;
   if (mask != EVENT_NONE) {
-    if ((r = epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ee)) < 0) {
-      lderr(cct) << __func__ << " epoll_ctl: modify fd=" << fd << " mask=" << mask
-                 << " failed." << cpp_strerror(errno) << dendl;
-      return -errno;
+    if (cct->_conf->ms_vpp_enable){  
+       if ((r = vcl_epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ee)) < 0) {  
+         lderr(cct) << __func__ << " epoll_ctl: modify fd=" << fd << " mask=" << mask  
+                  << " failed." << cpp_strerror(errno) << dendl;  
+         return -errno;  
+      }  
+    }else {  
+      if ((r = epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ee)) < 0) {  
+        lderr(cct) << __func__ << " epoll_ctl: modify fd=" << fd << " mask=" << mask  
+                   << " failed." << cpp_strerror(errno) << dendl;  
+        return -errno;  
+      }  
     }
   } else {
     /* Note, Kernel < 2.6.9 requires a non null event pointer even for
      * EPOLL_CTL_DEL. */
-    if ((r = epoll_ctl(epfd, EPOLL_CTL_DEL, fd, &ee)) < 0) {
-      lderr(cct) << __func__ << " epoll_ctl: delete fd=" << fd
-                 << " failed." << cpp_strerror(errno) << dendl;
-      return -errno;
-    }
+    if (cct->_conf->ms_vpp_enable){  
+      if ((r = vcl_epoll_ctl(epfd, EPOLL_CTL_DEL, fd, &ee)) < 0) {  
+        lderr(cct) << __func__ << " epoll_ctl: delete fd=" << fd  
+                  << " failed." << cpp_strerror(errno) << dendl;  
+        return -errno;  
+      }  
+    }else {  
+      if ((r = epoll_ctl(epfd, EPOLL_CTL_DEL, fd, &ee)) < 0) {  
+        lderr(cct) << __func__ << " epoll_ctl: delete fd=" << fd  
+                   << " failed." << cpp_strerror(errno) << dendl;  
+        return -errno;  
+      }  
+    }   
   }
   return 0;
 }
@@ -110,8 +139,12 @@ int EpollDriver::event_wait(vector<FiredFileEvent> &fired_events, struct timeval
 {
   int retval, numevents = 0;
 
-  retval = epoll_wait(epfd, events, size,
-                      tvp ? (tvp->tv_sec*1000 + tvp->tv_usec/1000) : -1);
+  if (cct->_conf->ms_vpp_enable)  
+    retval = vcl_epoll_wait(epfd, events, size,  
+                       tvp ? (tvp->tv_sec*1000 + tvp->tv_usec/1000) : -1);  
+  else  
+    retval = epoll_wait(epfd, events, size,  
+                     tvp ? (tvp->tv_sec*1000 + tvp->tv_usec/1000) : -1);
   if (retval > 0) {
     int j;
 

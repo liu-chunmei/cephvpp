@@ -66,6 +66,7 @@ int Processor::bind(const entity_addr_t &bind_addr,
   const md_config_t *conf = msgr->cct->_conf;
   // bind to a socket
   ldout(msgr->cct, 10) << __func__ << dendl;
+  static int port = 6800;
 
   int family;
   switch (bind_addr.get_family()) {
@@ -111,26 +112,33 @@ int Processor::bind(const entity_addr_t &bind_addr,
       }
     } else {
       // try a range of ports
-      for (int port = msgr->cct->_conf->ms_bind_port_min; port <= msgr->cct->_conf->ms_bind_port_max; port++) {
-        if (avoid_ports.count(port))
-          continue;
-
+//      for (int port = msgr->cct->_conf->ms_bind_port_min; port <= msgr->cct->_conf->ms_bind_port_max; port++) {
+bindport:
+        if (avoid_ports.count(port)){
+          port++;
+          goto bindport; 
+         // continue;
+        }
         listen_addr.set_port(port);
         worker->center.submit_to(worker->center.get_id(), [this, &listen_addr, &opts, &r]() {
           r = worker->listen(listen_addr, opts, &listen_socket);
         }, false);
-        if (r == 0)
-          break;
-      }
+//        if (r == 0)
+//          break;
+//      }
       if (r < 0) {
         lderr(msgr->cct) << __func__ << " unable to bind to " << listen_addr
                          << " on any port in range " << msgr->cct->_conf->ms_bind_port_min
                          << "-" << msgr->cct->_conf->ms_bind_port_max << ": "
                          << cpp_strerror(r) << dendl;
         listen_addr.set_port(0); // Clear port before retry, otherwise we shall fail again.
-        continue;
+//        continue;
+        port++;  
+        goto bindport;  
+
       }
       ldout(msgr->cct, 10) << __func__ << " bound on random port " << listen_addr << dendl;
+      port++; 
     }
     if (r == 0)
       break;

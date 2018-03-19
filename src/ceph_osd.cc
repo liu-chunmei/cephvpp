@@ -578,8 +578,8 @@ flushjournal_out:
   if (ms_public->bind(paddr) < 0)
     forker.exit(1);
 
-  if (ms_cluster->bind(caddr) < 0)
-    forker.exit(1);
+//  if (ms_cluster->bind(caddr) < 0)
+//    forker.exit(1);
 
   bool is_delay = g_conf->get_val<bool>("osd_heartbeat_use_min_delay_socket");
   if (is_delay) {
@@ -597,19 +597,19 @@ flushjournal_out:
       haddr.set_port(0);
   }
 
-  if (ms_hb_back_server->bind(haddr) < 0)
-    forker.exit(1);
-  if (ms_hb_back_client->client_bind(haddr) < 0)
-    forker.exit(1);
+//  if (ms_hb_back_server->bind(haddr) < 0)
+//    forker.exit(1);
+//  if (ms_hb_back_client->client_bind(haddr) < 0)
+//    forker.exit(1);
 
   // hb front should bind to same ip as public_addr
   entity_addr_t hb_front_addr = paddr;
   if (hb_front_addr.is_ip())
     hb_front_addr.set_port(0);
-  if (ms_hb_front_server->bind(hb_front_addr) < 0)
-    forker.exit(1);
-  if (ms_hb_front_client->client_bind(hb_front_addr) < 0)
-    forker.exit(1);
+//  if (ms_hb_front_server->bind(hb_front_addr) < 0)
+//    forker.exit(1);
+//  if (ms_hb_front_client->client_bind(hb_front_addr) < 0)
+//    forker.exit(1);
 
   // install signal handlers
   init_async_signal_handler();

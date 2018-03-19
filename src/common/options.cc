@@ -979,6 +979,10 @@ std::vector<Option> get_global_options() {
     .set_default(1)
     .set_description(""),
 
+    Option("ms_vpp_enable", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)  
+     .set_default(false)  
+     .set_description(""),  
+
     Option("ms_async_op_threads", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(3)
     .set_min_max(1, 24)

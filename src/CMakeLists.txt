@@ -20,6 +20,10 @@ set(pkgdatadir ${CMAKE_INSTALL_FULL_DATADIR})
 set(datadir ${CMAKE_INSTALL_FULL_DATADIR}/${PROJECT_NAME})
 set(prefix ${CMAKE_INSTALL_PREFIX})
 
+set (VPP_DIR "/home/chunmei/prtest/vpp/build-root/install-vpp-native/vpp/lib64")  
+set (VPP_LIB_LIST "${VPP_DIR}/libvppcom.a")  
+
+
 add_definitions("-DCEPH_LIBDIR=\"${CMAKE_INSTALL_FULL_LIBDIR}\"")
 add_definitions("-DCEPH_PKGLIBDIR=\"${CMAKE_INSTALL_FULL_PKGLIBDIR}\"")
 add_definitions("-DHAVE_CONFIG_H -D__CEPH__ -D_REENTRANT -D_THREAD_SAFE -D__STDC_FORMAT_MACROS")
@@ -473,6 +477,8 @@ set(libcommon_files
   msg/async/Stack.cc
   msg/async/PosixStack.cc
   msg/async/net_handler.cc
+  msg/async/vcl/ldp.c  
+  msg/async/vcl/ldp_socket_wrapper.c 
   msg/QueueStrategy.cc
   ${xio_common_srcs}
   ${async_rdma_common_srcs}
@@ -633,6 +639,7 @@ set(ceph_common_deps
   ${CRYPTO_LIBS}
   ${CMAKE_THREAD_LIBS_INIT}
   ${CMAKE_DL_LIBS})
+list(APPEND ceph_common_deps ${VPP_LIB_LIST})
 if(HAVE_RDMA)
   list(APPEND ceph_common_deps ${RDMA_LIBRARY})
 endif()
@@ -679,7 +686,7 @@ endif(WITH_DPDK)
 
 add_library(common STATIC ${ceph_common_objs})
 target_link_libraries(common
-  PRIVATE ${ceph_common_deps})
+  PRIVATE ${ceph_common_deps} -lpthread -lm -lrt)
 if(WITH_STATIC_LIBSTDCXX)
   # the apps linking against libcommon are daemons also written in C++, so we
   # need to link them against libstdc++.
@@ -688,7 +695,7 @@ if(WITH_STATIC_LIBSTDCXX)
 endif()
 
 add_library(ceph-common SHARED ${ceph_common_objs})
-target_link_libraries(ceph-common ${ceph_common_deps})
+target_link_libraries(ceph-common ${ceph_common_deps} -lpthread -lm -lrt)
 # appease dpkg-shlibdeps
 set_target_properties(ceph-common PROPERTIES
   SOVERSION 0
